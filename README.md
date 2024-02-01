@@ -1,3 +1,24 @@
+#大模型架构评测:
+
+1.py
+2.py
+3.py 
+4.py
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # Chinese LLaVA
 
 [![](https://img.shields.io/badge/Chinese-LLaVA-blue)](https://huggingface.co/spaces/LinkSoul/Chinese-LLaVA) [![](https://img.shields.io/badge/Commercial-Support-blue)](https://huggingface.co/spaces/LinkSoul/Chinese-LLaVA) [![](https://img.shields.io/badge/License-Apache_v2-blue)](https://github.com/LinkSoul-AI/Chinese-LLaVA/blob/main/LICENSE) [![](https://img.shields.io/badge/HuggingFace-Live_Demo-green)](https://huggingface.co/spaces/LinkSoul/Chinese-LLaVA) [![](https://img.shields.io/badge/Datasets-Chinese_Vision_Instructions-blue)](https://huggingface.co/spaces/LinkSoul/Chinese-LLaVA)

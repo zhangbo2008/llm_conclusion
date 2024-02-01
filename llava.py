@@ -38,7 +38,7 @@ DEFAULT_IM_END_TOKEN = "<im_end>"
 class LlavaConfig(LlamaConfig):
     model_type = "llava"
 
-
+from transformers import CLIPVisionConfig, CLIPVisionModel
 class LlavaLlamaModel(LlamaModel):
     config_class = LlavaConfig
 
@@ -47,7 +47,14 @@ class LlavaLlamaModel(LlamaModel):
 
         if hasattr(config, "mm_vision_tower"):
             # HACK: for FSDP
-            self.vision_tower = [CLIPVisionModel.from_pretrained(config.mm_vision_tower)]
+            self.vision_tower = [CLIPVisionModel(CLIPVisionConfig(
+    hidden_size= 1024,
+    intermediate_size=4096,
+    num_attention_heads= 16,
+    num_hidden_layers= 24,
+    patch_size= 14,
+    projection_dim= 768
+  ))]
             # self.vision_tower = CLIPVisionModel.from_pretrained(config.mm_vision_tower)
 
         if hasattr(config, "use_mm_proj"):
@@ -106,7 +113,24 @@ class LlavaLlamaModel(LlamaModel):
         #     orig_embeds_params = orig_embeds_params[0]
         #     with torch.no_grad():
         #         self.get_input_embeddings().weight.data[:-2] = orig_embeds_params[:-2].data
+        vision_tower = getattr(self, 'vision_tower', None)[0]
+        vision_tower.config.im_patch_token=32000
+        vision_tower.config.im_start_token=32001
+        vision_tower.config.im_end_token=32002
+        vision_tower.config.use_im_start_end=True
 
+        image_token_len = (vision_tower.config.image_size // vision_tower.config.patch_size) ** 2
+        qs=input_ids[0]
+        if 1:
+            qs =torch.cat(( qs , torch.tensor( [vision_tower.config.im_start_token]) , torch.tensor([vision_tower.config.im_patch_token] * image_token_len) , torch.tensor([vision_tower.config.im_end_token])),0)
+
+
+
+
+
+
+
+        input_ids=qs.unsqueeze(0)
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
 
@@ -133,24 +157,37 @@ class LlavaLlamaModel(LlamaModel):
                 image_features = [self.mm_projector(image_feature)[0] for image_feature in image_features] 
             else:
                 image_features = self.mm_projector(image_features)
+            # 图片num_patches:256     image_features: 1, 256, 4096
+
+
             dummy_image_features = torch.zeros(256, 1024, device=inputs_embeds.device, dtype=inputs_embeds.dtype)
             dummy_image_features = self.mm_projector(dummy_image_features)
-
+             # 调试的话直接用dummy_image_features也行.
             new_input_embeds = []
             cur_image_idx = 0
+
+            vision_tower.config.im_patch_token=32000
+            vision_tower.config.im_start_token=32001
+            vision_tower.config.im_end_token=32002
+            vision_tower.config.use_im_start_end=True
+
+            image_token_len = (vision_tower.config.image_size // vision_tower.config.patch_size) ** 2
+     
+         
+
             for cur_input_ids, cur_input_embeds in zip(input_ids, inputs_embeds):
                 if (cur_input_ids == vision_tower.config.im_patch_token).sum() == 0:
-                    # multimodal LLM, but the current sample is not multimodal
+                    # multimodal LLM, but the current sample is not multimodal  # 纯语言模型.
                     cur_input_embeds = cur_input_embeds + (0. * dummy_image_features).sum()
                     new_input_embeds.append(cur_input_embeds)
                     cur_image_idx += 1
                     continue
                 if vision_tower.config.use_im_start_end:
-                    cur_image_features = image_features[cur_image_idx]
+                    cur_image_features = image_features[cur_image_idx] # 取出图片特征.
                     num_patches = cur_image_features.shape[0]
                     if (cur_input_ids == vision_tower.config.im_start_token).sum() != (cur_input_ids == vision_tower.config.im_end_token).sum():
                         raise ValueError("The number of image start tokens and image end tokens should be the same.")
-                    image_start_tokens = torch.where(cur_input_ids == vision_tower.config.im_start_token)[0]
+                    image_start_tokens = torch.where(cur_input_ids == vision_tower.config.im_start_token)[0] #找到图片开始的索引
                     for image_start_token_pos in image_start_tokens:
                         cur_image_features = image_features[cur_image_idx].to(device=cur_input_embeds.device)
                         num_patches = cur_image_features.shape[0]
@@ -159,7 +196,7 @@ class LlavaLlamaModel(LlamaModel):
                         if orig_embeds_params is not None:
                             cur_new_input_embeds = torch.cat((cur_input_embeds[:image_start_token_pos].detach(), cur_input_embeds[image_start_token_pos:image_start_token_pos+1], cur_image_features, cur_input_embeds[image_start_token_pos + num_patches + 1:image_start_token_pos + num_patches + 2], cur_input_embeds[image_start_token_pos + num_patches + 2:].detach()), dim=0)
                         else:
-                            cur_new_input_embeds = torch.cat((cur_input_embeds[:image_start_token_pos+1], cur_image_features, cur_input_embeds[image_start_token_pos + num_patches + 1:]), dim=0)
+                            cur_new_input_embeds = torch.cat((cur_input_embeds[:image_start_token_pos+1], cur_image_features, cur_input_embeds[image_start_token_pos + num_patches + 1:]), dim=0)  # 文字信息+图片开始token+图片特征+图片结束token#==============核心代码都在这里!!!!!!!
                         cur_image_idx += 1
                     new_input_embeds.append(cur_new_input_embeds)
                 else:
